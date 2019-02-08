@@ -1,129 +1,131 @@
 import os
-# import urllib.request
-# import urllib.parse
-# from urllib.error import HTTPError, URLError
-import socket
-import re
+import sys
 import requests
 from bs4 import BeautifulSoup
+import re
+import configparser
 
-print("Started")
+#proxies = {
+#  'http': 'http://andrew.britton:ClaraPandy4@proxy.nec.com.au:9090',
+#  'https': 'http://andrew.britton:ClaraPandy4@proxy.nec.com.au:9090'
+#}
 
-proxies = {
-  'http': 'http://andrew.britton:ClaraPandy4@proxy.nec.com.au:9090',
-  'https': 'http://andrew.britton:ClaraPandy4@proxy.nec.com.au:9090'
-}
-
-scorpexurl = "https://scorpexuke.com/songs/?order=n"
-
-print("Opening: " + scorpexurl)
-
-page = requests.get(scorpexurl, proxies=proxies)
-
-print("- loaded " + str(len(page.content)) + " bytes")
-
-saveFile = open('indexpage.html','wb')
-saveFile.write(page.content)
-saveFile.close()
-print("- written page content to file")
-
-linkFile = open("links.txt","w")
-soup = BeautifulSoup(page.content, "html.parser")
-entryContent = soup.find("div", class_="entry-content")
-print("- found entry-content div")
-
-urlMatch = "scorpexuke\\.com/[^/]+$"
-
-linkList = entryContent.find_all("a", href=re.compile(urlMatch))
-print("- found " + str(len(linkList)) + " links")
-
+proxies = None 
 # *nix
 localDir = "/home/pi/ScorpexDownloader/PDF"
 dirSep = "/"
 
 # Win
-localDir = "C:\Repos\ScorpexDownload\Python\PDF"
-dirSep = "\\"
+#localDir = "C:\Repos\ScorpexDownload\Python\PDF"
+#dirSep = "\\"
 
-pdfMatch = re.compile("pdffiles")
+indexScorpex = "https://scorpexuke.com/songs/?order=n"
+urlMatch = re.compile("scorpexuke\\.com/[^/]+$")
+pdfUrlTemplate = "https://scorpexuke.com/pdffiles/{}.pdf"
+pdfHrefMatch = re.compile("/pdffiles/.+?\.pdf")
 
-for link in linkList:
-    songPageURL = str(link.get("href"))
+def GetWebResource(url, proxies, maxAttempts, timeout):
 
-    # Extract Song Title and Artist
-    divText = link.parent.text
-    songTitle = divText.partition("  ")[0].strip()
-    songArtist = divText.rpartition(chr(8211))[-1].strip()
-    songKey = divText.partition("  ")[2].partition(chr(8211))[0].strip()
-
-    print(songTitle + " - " + songArtist + " - (" + songKey + ")")
-    alternateLocalFileName = localDir + dirSep + songTitle + " - " + songArtist + " - (" + songKey + ")" + ".pdf"
-
-    # Before we open the song page, guess the filename and test. If it exists, skip loading the song page
-
-    fileNameGuess = localDir + dirSep + songPageURL.rpartition("/")[-1] + ".pdf"
-
-    if (not(os.path.isfile(fileNameGuess) and os.path.getsize(fileNameGuess) > 0)):
-        print("Opening: " + songPageURL)
+    attemptCounter = 0
+    successFlag = 0
+    while attemptCounter < maxAttempts and successFlag == 0:
         try:
-            tries=5
-            songPage = None
-            while songPage is None and tries>0:
-                try:
-                    songPage = requests.get(songPageURL, proxies=proxies)
-                except:
-                    songPage = None
-                    tries = tries - 1
-            
-            songPageBytes = songPage.content
-            print("- loaded " + str(len(songPageBytes)) + " bytes")
-            
-            print("- parsing")
-            songSoup = BeautifulSoup(songPageBytes, "html.parser")
-            if songSoup is None:
-                print("ERROR - failed to parse")
+            if proxies is None:
+                response = requests.get(url)
             else:
-                songEntryHeader = songSoup.find("header", class_="entry-header")
-                if songEntryHeader is None:
-                    print("ERROR - could not find entry-header")
-                else:
-                    songEntryHeaderText = songEntryHeader.string
-                    print("- header text: " + str(songEntryHeaderText))
-                
-                    songEntryContent = songSoup.find("div", class_="entry-content")
-                    if songEntryContent is None:
-                        print("ERROR - could not find entry-content div")
-                    else:
-                        pdfLink = songSoup.find("a", href=pdfMatch)
-                        if pdfLink is None:
-                            print("ERROR - could not find PDF link")
-                        else:
-                            pdfURL = str(pdfLink.get("href"))
-                            print("- PDF URL: " + pdfURL)
-                            filename = pdfURL.rpartition("/")[-1]
-                            localFilename = localDir + dirSep + filename
-                            if os.path.isfile(localFilename) and os.path.getsize(localFilename) > 0:
-                                print("- file already exists")
-                            else:
-                                print("- downloading to " + localFilename)
-                                tries=5
-                                songPDF = None
-                                while songPDF is None and tries>0:
-                                    try:
-                                        songPDF = requests.get(pdfURL, proxies=proxies)
-                                    except:
-                                        songPDF = None
-                                        tries = tries - 1
-                                songPDFBytes = songPDF.content
+                response = requests.get(url, proxies=proxies)
+            
+            response.raise_for_status()
 
-                                pdfFile = open(localFilename, "wb")
-                                pdfFile.write(songPDFBytes)
-                                pdfFile.close()
-                            
+            successFlag = 1
         except:
-            print("ERROR - failed to load page")
-        
-        
-linkFile.close()
+            attemptCounter +=1
 
-print("Finished")
+    if successFlag == 1:
+        return response
+    else:
+        return None
+
+def DownloadFile(localFilename, url, proxies, maxAttempts, timeout):
+    print("- downloading {} to {}".format(url, localFilename))
+    resource = GetWebResource(url, proxies, 1, 10)
+    if ( resource is not None and len(resource.content) > 0):
+        localFile = open(localFilename, "wb")
+        localFile.write(resource.content)
+        localFile.close()
+        return True
+    else:
+        return False
+
+def GetSongDetails(divSongLink):
+    divText = divSongLink.text
+    artist = divText.rpartition(chr(8211))[-1].strip().replace("\\","-").replace("/","-")
+    if (len(artist) == 0):
+        artist = "(unknown)"
+    title = divText.partition("  ")[0].strip().replace("\\","-").replace("/","-")
+    keyandchords = divText.partition("  ")[2].partition(chr(8211))[0].strip()
+    key = keyandchords.partition("/")[0]
+    pageURL = divSongLink.a.get("href")
+
+    return { "title": title, "artist": artist, "key": key,
+            "chordCount": keyandchords.rpartition("/")[0],
+            "filenameGuess": pageURL.rpartition("/")[-1] + ".pdf",
+            "urlGuess": pdfUrlTemplate.format(pageURL.rpartition("/")[-1]),
+            "filenameBugFormat": "{} - {} - Scorpex ({}).pdf".format(artist, title, key),
+            "pageURL": pageURL
+            }
+
+#def DownloadSong():
+
+try:
+
+    indexPage_Response = GetWebResource(indexScorpex, proxies, 5, 30)
+    indexPage = BeautifulSoup(indexPage_Response.content, "html.parser")
+    divEntryContent = indexPage.find("div", class_="entry-content")
+    linkList = divEntryContent.find_all("a", href=urlMatch)
+
+    logFile = open("ScorpexDownloader.log", "w")
+    logFileTemplate = "{}\r\n - '{}'\r\n - '{}'\r\n"
+
+    songDictionary = {}
+    for link in linkList:
+
+        songDetails = GetSongDetails(link.parent)
+
+        if os.path.isfile(localDir + dirSep + songDetails["filenameBugFormat"]):
+            songDetails["status"] = "Present"
+        elif os.path.isfile(localDir + dirSep + songDetails["filenameGuess"]):
+            songDetails["status"] = "Present"
+            os.rename(localDir + dirSep + songDetails["filenameGuess"], localDir + dirSep + songDetails["filenameBugFormat"])
+        else:
+            if DownloadFile(localDir + dirSep + songDetails["filenameBugFormat"], songDetails["urlGuess"], proxies, 1, 10):
+                songDetails["status"] = "Present"
+            else:
+                songPage_Response = GetWebResource(songDetails["pageURL"], proxies, 5, 30)
+                songPage = BeautifulSoup(songPage_Response.content, "html.parser")
+                pdfURLtag = songPage.find("a", href=pdfHrefMatch)
+                pdfURL = pdfURLtag.get("href")
+                if DownloadFile(localDir + dirSep + songDetails["filenameBugFormat"], pdfURL.strip(), proxies, 1, 10):
+                    songDetails["status"] = "Present"
+                else:
+                    songDetails["status"] = "Missing"
+
+        logFile.write(logFileTemplate.format(songDetails["pageURL"], songDetails["filenameGuess"], songDetails["filenameBugFormat"]))
+
+        if songDetails["status"] != "Present": 
+            print("{}: {} - {} : {}".format(songDetails["status"], songDetails["artist"], songDetails["title"], songDetails["pageURL"]))
+
+        dictKey = songDetails["pageURL"]
+        songDictionary[dictKey] = songDetails
+        
+    logFile.close()
+    # print("Found %i songs" % len(songDictionary))
+
+except:
+    errType, errValue, errTraceback = sys.exc_info()
+    print(errType)
+    print(errValue)
+    print(errTraceback)
+
+print("finished")
+
