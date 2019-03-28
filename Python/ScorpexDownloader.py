@@ -1,7 +1,9 @@
+import linecache
 import os
 import sys
 import requests
 from bs4 import BeautifulSoup
+from bs4 import UnicodeDammit
 import re
 import configparser
 
@@ -12,7 +14,7 @@ import configparser
 
 proxies = None 
 # *nix
-localDir = "/home/pi/ScorpexDownloader/PDF"
+localDir = "/home/pi/Ukulele/Scorpex"
 dirSep = "/"
 
 # Win
@@ -24,6 +26,16 @@ urlMatch = re.compile("scorpexuke\\.com/[^/]+$")
 pdfUrlTemplate = "https://scorpexuke.com/pdffiles/{}.pdf"
 pdfHrefMatch = re.compile("/pdffiles/.+?\.pdf")
 
+def PrintException():
+    exc_type, exc_obj, tb = sys.exc_info()
+    f = tb.tb_frame
+    lineno = tb.tb_lineno
+    filename = f.f_code.co_filename
+    linecache.checkcache(filename)
+    line = linecache.getline(filename, lineno, f.f_globals)
+    print('EXCEPTION IN ({}, LINE {} "{}"): {}'.format(filename, lineno, line.strip(), exc_obj))
+
+
 def GetWebResource(url, proxies, maxAttempts, timeout):
 
     attemptCounter = 0
@@ -31,9 +43,9 @@ def GetWebResource(url, proxies, maxAttempts, timeout):
     while attemptCounter < maxAttempts and successFlag == 0:
         try:
             if proxies is None:
-                response = requests.get(url)
+                response = requests.get(url, timeout=timeout)
             else:
-                response = requests.get(url, proxies=proxies)
+                response = requests.get(url, proxies=proxies, timeout=timeout)
             
             response.raise_for_status()
 
@@ -48,7 +60,7 @@ def GetWebResource(url, proxies, maxAttempts, timeout):
 
 def DownloadFile(localFilename, url, proxies, maxAttempts, timeout):
     print("- downloading {} to {}".format(url, localFilename))
-    resource = GetWebResource(url, proxies, 1, 10)
+    resource = GetWebResource(url, proxies, maxAttempts, timeout)
     if ( resource is not None and len(resource.content) > 0):
         localFile = open(localFilename, "wb")
         localFile.write(resource.content)
@@ -58,11 +70,12 @@ def DownloadFile(localFilename, url, proxies, maxAttempts, timeout):
         return False
 
 def GetSongDetails(divSongLink):
-    divText = divSongLink.text
-    artist = divText.rpartition(chr(8211))[-1].strip().replace("\\","-").replace("/","-")
+    uSpecial1 = u"\u2013" # EN DASH 8211 dec
+    divText = divSongLink.text.replace(u"\u2018","'").replace(u"\u2019","'").replace(u"\u201c","'").replace(u"\u201d","'").replace(u"\u2026","-")
+    artist = divText.rpartition(chr(8211))[-1].strip().replace("\\","-").replace("/","-").replace(uSpecial1,"-")
     if (len(artist) == 0):
         artist = "(unknown)"
-    title = divText.partition("  ")[0].strip().replace("\\","-").replace("/","-")
+    title = divText.partition("  ")[0].strip().replace("\\","-").replace("/","-").replace(uSpecial1,"-")
     keyandchords = divText.partition("  ")[2].partition(chr(8211))[0].strip()
     key = keyandchords.partition("/")[0]
     pageURL = divSongLink.a.get("href")
@@ -71,7 +84,7 @@ def GetSongDetails(divSongLink):
             "chordCount": keyandchords.rpartition("/")[0],
             "filenameGuess": pageURL.rpartition("/")[-1] + ".pdf",
             "urlGuess": pdfUrlTemplate.format(pageURL.rpartition("/")[-1]),
-            "filenameBugFormat": "{} - {} - Scorpex ({}).pdf".format(artist, title, key),
+            "filenameBugFormat": "{} - {} - Scorpex ({}).pdf".format(title, artist, key),
             "pageURL": pageURL
             }
 
@@ -81,6 +94,7 @@ try:
 
     indexPage_Response = GetWebResource(indexScorpex, proxies, 5, 30)
     indexPage = BeautifulSoup(indexPage_Response.content, "html.parser")
+
     divEntryContent = indexPage.find("div", class_="entry-content")
     linkList = divEntryContent.find_all("a", href=urlMatch)
 
@@ -122,10 +136,10 @@ try:
     # print("Found %i songs" % len(songDictionary))
 
 except:
-    errType, errValue, errTraceback = sys.exc_info()
-    print(errType)
-    print(errValue)
-    print(errTraceback)
+	PrintException()
+    # errType, errValue, errTraceback = sys.exc_info()
+    # print(errType)
+    # print(errValue)
+    # print(errTraceback)
 
 print("finished")
-
