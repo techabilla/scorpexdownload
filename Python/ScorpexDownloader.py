@@ -15,6 +15,7 @@ import configparser
 proxies = None 
 # *nix
 localDir = "/home/pi/Ukulele/Scorpex"
+# localDir = "/home/pi/Scripts/ScorpexDownloader/test"
 dirSep = "/"
 
 # Win
@@ -68,16 +69,28 @@ def DownloadFile(localFilename, url, proxies, maxAttempts, timeout):
         return True
     else:
         return False
+    
+def StringFixup(stringToFix):
+    uSpecial1 = u"\u2013" # EN DASH 8211 dec
+    
+    return stringToFix.replace("\\","-").replace("/","-").replace(uSpecial1,"-")
 
 def GetSongDetails(divSongLink):
     uSpecial1 = u"\u2013" # EN DASH 8211 dec
     divText = divSongLink.text.replace(u"\u2018","'").replace(u"\u2019","'").replace(u"\u201c","'").replace(u"\u201d","'").replace(u"\u2026","-")
-    artist = divText.rpartition(chr(8211))[-1].strip().replace("\\","-").replace("/","-").replace(uSpecial1,"-")
+    
+    # artist = divText.rpartition(chr(8211))[-1].strip().replace("\\","-").replace("/","-").replace(uSpecial1,"-")
+    artist = StringFixup(divText.rpartition("-")[-1].strip())
     if (len(artist) == 0):
         artist = "(unknown)"
-    title = divText.partition("  ")[0].strip().replace("\\","-").replace("/","-").replace(uSpecial1,"-")
+    
+    # title = divText.partition("!  ")[0].strip().replace("\\","-").replace("/","-").replace(uSpecial1,"-")
+    title = StringFixup(divSongLink.a.string)
+    
     keyandchords = divText.partition("  ")[2].partition(chr(8211))[0].strip()
+    
     key = keyandchords.partition("/")[0]
+
     pageURL = divSongLink.a.get("href")
 
     return { "title": title, "artist": artist, "key": key,
@@ -108,9 +121,12 @@ try:
 
         if os.path.isfile(localDir + dirSep + songDetails["filenameBugFormat"]):
             songDetails["status"] = "Present"
+            print("- present {}".format(songDetails["filenameBugFormat"]))
         elif os.path.isfile(localDir + dirSep + songDetails["filenameGuess"]):
             songDetails["status"] = "Present"
+            print("- present {}".format(songDetails["filenameGuess"]))
             os.rename(localDir + dirSep + songDetails["filenameGuess"], localDir + dirSep + songDetails["filenameBugFormat"])
+            print("- renamed to {}".format(songDetails["filenameBugFormat"]))
         else:
             if DownloadFile(localDir + dirSep + songDetails["filenameBugFormat"], songDetails["urlGuess"], proxies, 1, 10):
                 songDetails["status"] = "Present"
@@ -136,7 +152,7 @@ try:
     # print("Found %i songs" % len(songDictionary))
 
 except:
-	PrintException()
+    PrintException()
     # errType, errValue, errTraceback = sys.exc_info()
     # print(errType)
     # print(errValue)
