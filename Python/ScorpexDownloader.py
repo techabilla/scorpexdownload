@@ -1,26 +1,25 @@
 import linecache
 import os
+import re
 import sys
+
 import requests
 from bs4 import BeautifulSoup
-from bs4 import UnicodeDammit
-import re
-import configparser
 
 #proxies = {
-#  'http': 'http://andrew.britton:ClaraPandy4@proxy.nec.com.au:9090',
-#  'https': 'http://andrew.britton:ClaraPandy4@proxy.nec.com.au:9090'
+#  "http": "http://andrew.britton:ClaraPandy7@proxy.nec.com.au:9090",
+#  "https": "http://andrew.britton:ClaraPandy7@proxy.nec.com.au:9090"
 #}
 
-proxies = None 
+proxies = None
 # *nix
-localDir = "/home/pi/Ukulele/Scorpex"
+# localDir = "/home/pi/Ukulele/Scorpex"
 # localDir = "/home/pi/Scripts/ScorpexDownloader/test"
 dirSep = "/"
 
 # Win
-#localDir = "C:\Repos\ScorpexDownload\Python\PDF"
-#dirSep = "\\"
+localDir = "C:\Repos\ScorpexDownload\Python\PDF"
+dirSep = "\\"
 
 indexScorpex = "https://scorpexuke.com/songs/?order=n"
 urlMatch = re.compile("scorpexuke\\.com/[^/]+$")
@@ -72,52 +71,50 @@ def DownloadFile(localFilename, url, proxies, maxAttempts, timeout):
     
 def StringFixup(stringToFix):
     uSpecial1 = u"\u2013" # EN DASH 8211 dec
-    
-    return stringToFix.replace("\\","-").replace("/","-").replace(uSpecial1,"-")
 
-def GetSongDetails(divSongLink):
-    uSpecial1 = u"\u2013" # EN DASH 8211 dec
-    divText = divSongLink.text.replace(u"\u2018","'").replace(u"\u2019","'").replace(u"\u201c","'").replace(u"\u201d","'").replace(u"\u2026","-")
-    
-    # artist = divText.rpartition(chr(8211))[-1].strip().replace("\\","-").replace("/","-").replace(uSpecial1,"-")
-    artist = StringFixup(divText.rpartition("-")[-1].strip())
-    if (len(artist) == 0):
+    return stringToFix.replace("\\","-").replace("/","-").replace(uSpecial1,"-").replace('"',"'")
+
+def GetSongDetails(divMusicalComposition):
+
+    artist = divMusicalComposition.find(itemprop="creator").string
+    if (artist == None):
         artist = "(unknown)"
-    
-    # title = divText.partition("!  ")[0].strip().replace("\\","-").replace("/","-").replace(uSpecial1,"-")
-    title = StringFixup(divSongLink.a.string)
-    
-    keyandchords = divText.partition("  ")[2].partition(chr(8211))[0].strip()
-    
-    key = keyandchords.partition("/")[0]
+    else:
+        artist = StringFixup(artist)
 
-    pageURL = divSongLink.a.get("href")
+    title = divMusicalComposition.find(itemprop="name").string
+    title = StringFixup(title)
+
+    key = divMusicalComposition.find(itemprop="musicalKey").string
+    pageURL = divMusicalComposition.a["href"]
 
     return { "title": title, "artist": artist, "key": key,
-            "chordCount": keyandchords.rpartition("/")[0],
+            "chordCount": 0,
             "filenameGuess": pageURL.rpartition("/")[-1] + ".pdf",
             "urlGuess": pdfUrlTemplate.format(pageURL.rpartition("/")[-1]),
             "filenameBugFormat": "{} - {} - Scorpex ({}).pdf".format(title, artist, key),
             "pageURL": pageURL
             }
-
-#def DownloadSong():
-
+    
 try:
 
     indexPage_Response = GetWebResource(indexScorpex, proxies, 5, 30)
     indexPage = BeautifulSoup(indexPage_Response.content, "html.parser")
 
     divEntryContent = indexPage.find("div", class_="entry-content")
-    linkList = divEntryContent.find_all("a", href=urlMatch)
+    # linkList = divEntryContent.find_all("a", href=urlMatch)
+    musicalCompositions = indexPage.find_all(name="div", itemtype="http://schema.org/MusicComposition")
 
     logFile = open("ScorpexDownloader.log", "w")
     logFileTemplate = "{}\r\n - '{}'\r\n - '{}'\r\n"
 
     songDictionary = {}
-    for link in linkList:
+    #for link in linkList:
+    for composition in musicalCompositions:
 
-        songDetails = GetSongDetails(link.parent)
+        songDetails = GetSongDetails(composition)
+
+        #songDetails = GetSongDetails(link.parent)
 
         if os.path.isfile(localDir + dirSep + songDetails["filenameBugFormat"]):
             songDetails["status"] = "Present"
